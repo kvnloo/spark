@@ -1,0 +1,127 @@
+name: Spark full downstream matrix
+on:
+  push:
+    branches:
+      - experiments/quackles-full-matrix
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - uses: actions/download-artifact@v8
+        with:
+          name: spark-lab-offline-runtime
+          run-id: 39385731760
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/runtime
+      - name: Verify and reuse exact locked toolchain
+        shell: bash
+        run: |
+          mkdir -p /tmp/spark-runtime-source
+          tar -xf artifacts/runtime/source.tar -C /tmp/spark-runtime-source
+          cmp package-lock.json /tmp/spark-runtime-source/package-lock.json
+          diff -qr --exclude=pkg --exclude=target rust /tmp/spark-runtime-source/rust
+          tar -xzf artifacts/runtime/toolchain.tar.gz
+      - run: node --test scripts/lab/*.test.mjs
+      - run: npm run types
+      - run: npm test
+      - name: Generate one fixture set shared by every shard
+        env:
+          CI: "true"
+        run: node --experimental-strip-types --input-type=module -e "const { default: setup } = await import('./test/browser/global-setup.ts'); await setup();"
+      - name: Package identical dependencies and fixture bytes
+        run: tar -czf artifacts/matrix-runtime.tar.gz node_modules rust/spark-rs/pkg test/browser/fixtures
+      - uses: actions/upload-artifact@v7
+        with:
+          name: spark-full-matrix-runtime
+          path: artifacts/matrix-runtime.tar.gz
+          retention-days: 2
+  experiment:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 7
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      SPARK_LAB_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-shard${{ matrix.shard }}
+      SPARK_QUACKLES_LAB: "1"
+      SPARK_LAB_PROFILE: full
+      SPARK_LAB_FRAMES: "20"
+      PLAYWRIGHT_JSON_OUTPUT_FILE: artifacts/playwright-results.json
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - uses: actions/download-artifact@v8
+        with:
+          name: spark-full-matrix-runtime
+          path: artifacts
+      - run: tar -xzf artifacts/matrix-runtime.tar.gz
+      - run: npx playwright install --with-deps chromium
+      - name: Execute 16 cells on one measurement host
+        run: npm run test:browser -- --grep @quackles-lab --fully-parallel --workers=1 --shard=${{ matrix.shard }}/7 --reporter=line,json
+      - name: Require all 16 valid receipts and eight same-host pairs
+        if: ${{ !cancelled() }}
+        run: SPARK_LAB_EXPECTED=16 node scripts/lab/summarize.mjs "artifacts/spark-quackles/$SPARK_LAB_RUN_ID"
+      - name: Preserve measurements separately from execution failures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: quackles-full-receipts-${{ matrix.shard }}
+          path: artifacts/spark-quackles/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve all test outcomes, including missing-receipt failures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: quackles-full-outcomes-${{ matrix.shard }}
+          path: |
+            artifacts/playwright-results.json
+            test-results/
+          if-no-files-found: warn
+          retention-days: 14
+  aggregate:
+    if: ${{ always() && !cancelled() && needs.prepare.result == 'success' }}
+    needs: [prepare, experiment]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: quackles-full-receipts-*
+          path: artifacts/full-receipts
+          merge-multiple: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: quackles-full-outcomes-*
+          path: artifacts/full-outcomes
+          merge-multiple: false
+      - name: Fail closed unless all 112 receipts qualify
+        run: SPARK_LAB_EXPECTED=112 node scripts/lab/summarize.mjs artifacts/full-receipts
+      - name: Preserve combined evidence without calling failures winners
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: quackles-full-matrix-evidence
+          path: |
+            artifacts/full-receipts/
+            artifacts/full-outcomes/
+          if-no-files-found: error
+          retention-days: 14
