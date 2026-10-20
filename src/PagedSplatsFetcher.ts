@@ -28,10 +28,8 @@ export class FileBytesPagedSplatsFetcher implements PagedSplatsFetcher {
   }
 
   async fetchRange(abortSignal: AbortSignal, offset: number, bytes: number) {
-    if (offset < 0 || (offset > 0 && offset + bytes > this.fileBytes.length)) {
-      throw new Error(
-        `Invalid chunk offset or bytes: ${offset} + ${bytes} > ${this.fileBytes.length}`,
-      );
+    if (offset < 0) {
+      throw new Error(`Invalid chunk offset: ${offset}`);
     }
 
     return this.fileBytes.slice(offset, offset + bytes);

@@ -1,0 +1,59 @@
+name: Paged range tail downstream regression
+on:
+  push:
+    branches:
+      - fix/filebytes-range-tail
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - run: npm ci
+      - name: Check focused source and regression style
+        run: npx biome check src/PagedSplatsFetcher.ts test/unit/PagedSplatsFetcher.range.test.ts
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-spark-range-${{ hashFiles('rust/Cargo.lock') }}
+      - run: rustup target add wasm32-unknown-unknown
+      - run: command -v wasm-pack || cargo install wasm-pack --locked
+      - run: npm run build:wasm
+      - run: npm run types
+      - name: Full unit suite
+        run: npm test
+      - name: Confirm upstream control fails the new regressions
+        shell: bash
+        run: |
+          mkdir -p artifacts/range-tail
+          cp src/PagedSplatsFetcher.ts /tmp/PagedSplatsFetcher.fixed.ts
+          trap 'cp /tmp/PagedSplatsFetcher.fixed.ts src/PagedSplatsFetcher.ts' EXIT
+          git fetch --depth=1 origin ffe210dc0a45d0515a06c9235878108112827d61
+          git show ffe210dc0a45d0515a06c9235878108112827d61:src/PagedSplatsFetcher.ts > src/PagedSplatsFetcher.ts
+          set +e
+          npx vitest run test/unit/PagedSplatsFetcher.range.test.ts --reporter=verbose > artifacts/range-tail/control.log 2>&1
+          status=$?
+          set -e
+          cat artifacts/range-tail/control.log
+          test "$status" -ne 0
+          grep -E '7 failed.*4 passed' artifacts/range-tail/control.log
+      - name: Export regression evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: range-tail-regression-evidence
+          path: artifacts/range-tail/
+          if-no-files-found: warn
+          retention-days: 14
