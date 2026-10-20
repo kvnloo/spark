@@ -1,0 +1,54 @@
+name: HTTP range fallback downstream regression
+on:
+  push:
+    branches:
+      - fix/http-range-full-response
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - run: npm ci
+      - run: npx biome check src/PagedSplatsFetcher.ts test/unit/PagedSplatsFetcher.http.test.ts
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-spark-range-${{ hashFiles('rust/Cargo.lock') }}
+      - run: rustup target add wasm32-unknown-unknown
+      - run: command -v wasm-pack || cargo install wasm-pack --locked
+      - run: npm run build:wasm
+      - run: npm run types
+      - run: npm test
+      - name: Require upstream red control
+        shell: bash
+        run: |
+          mkdir -p artifacts/http-range
+          cp src/PagedSplatsFetcher.ts /tmp/PagedSplatsFetcher.fixed.ts
+          trap 'cp /tmp/PagedSplatsFetcher.fixed.ts src/PagedSplatsFetcher.ts' EXIT
+          git fetch --depth=1 origin ffe210dc0a45d0515a06c9235878108112827d61
+          git show ffe210dc0a45d0515a06c9235878108112827d61:src/PagedSplatsFetcher.ts > src/PagedSplatsFetcher.ts
+          set +e
+          npx vitest run test/unit/PagedSplatsFetcher.http.test.ts --reporter=verbose > artifacts/http-range/control.log 2>&1
+          status=$?
+          set -e
+          cat artifacts/http-range/control.log
+          test "$status" -ne 0
+          grep -E '19 failed.*25 passed' artifacts/http-range/control.log
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: http-range-regression-evidence
+          path: artifacts/http-range/
+          if-no-files-found: warn
+          retention-days: 14
