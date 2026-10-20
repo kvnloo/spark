@@ -36,7 +36,8 @@ jobs:
       - name: Generate one fixture set shared by every shard
         env:
           CI: "true"
-        run: node --experimental-strip-types --input-type=module -e "const { default: setup } = await import('./test/browser/global-setup.ts'); await setup();"
+        run: |
+          node --experimental-strip-types --input-type=module -e "const { default: setup } = await import('./test/browser/global-setup.ts'); await setup();"
       - name: Package identical dependencies and fixture bytes
         run: tar -czf artifacts/matrix-runtime.tar.gz node_modules rust/spark-rs/pkg test/browser/fixtures
       - uses: actions/upload-artifact@v7
