@@ -1,0 +1,42 @@
+name: Real RAD HTTP and WASM downstream integration
+on:
+  push:
+    branches:
+      - experiments/rad-http-integration
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - run: npm ci
+      - run: npx biome check scripts/lab/rad-http-roundtrip.mjs
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-spark-rad-http-${{ hashFiles('rust/Cargo.lock') }}
+      - run: rustup target add wasm32-unknown-unknown
+      - run: command -v wasm-pack || cargo install wasm-pack --locked
+      - run: npm run build:wasm
+      - name: Generate the existing Spark fixtures without a browser
+        run: node --experimental-strip-types -e "import('./test/browser/global-setup.ts').then(m => m.default())"
+      - name: Require the real-decoder positive and negative controls
+        run: node scripts/lab/rad-http-roundtrip.mjs
+      - name: Export exact evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: rad-http-real-decoder-receipt
+          path: artifacts/rad-http-roundtrip/
+          if-no-files-found: warn
+          retention-days: 14
