@@ -1,0 +1,53 @@
+name: Spark motion settle diagnostic
+on:
+  push:
+    branches:
+      - experiments/quackles-settle-probe
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - name: Reuse exact locked dependencies and compiled WASM
+        uses: actions/download-artifact@v8
+        with:
+          name: spark-lab-offline-runtime
+          run-id: 39385731760
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/runtime
+      - name: Verify dependency provenance before extraction
+        shell: bash
+        run: |
+          tar -xOf artifacts/runtime/source.tar package-lock.json | cmp - package-lock.json
+          tar -xOf artifacts/runtime/source.tar rust/Cargo.lock | cmp - rust/Cargo.lock
+          tar -xzf artifacts/runtime/toolchain.tar.gz
+      - run: npm run types
+      - run: npx biome check test/browser/quackles-settle-probe.test.ts
+      - run: npx playwright install --with-deps chromium
+      - name: Bounded causal probe with explicit failure evidence
+        run: SPARK_SETTLE_PROBE=1 npm run test:browser -- --grep @settle-probe
+      - name: Export state and browser reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-settle-probe-evidence
+          path: |
+            artifacts/settle-probe/
+            test/browser/playwright-report/
+          retention-days: 14
+      - name: Export generated fixtures for offline reproduction
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-pinned-browser-fixtures
+          path: test/browser/fixtures/
+          if-no-files-found: warn
+          retention-days: 2
