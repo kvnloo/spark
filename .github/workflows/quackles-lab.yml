@@ -19,7 +19,7 @@ jobs:
           node-version: "22.x"
       - run: npm ci
       - run: node --test scripts/lab/*.test.mjs
-      - run: npx biome check scripts/lab test/browser/quackles-lab.test.ts
+      - run: npx biome check scripts/lab test/browser/quackles-lab.test.ts test/browser/quackles-settle.test.ts
       - name: Export pinned formatter for offline reproduction
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -63,12 +63,19 @@ jobs:
           path: artifacts/runtime/
           retention-days: 2
       - run: npx playwright install --with-deps chromium
-      - name: Focused 8-cell downstream suite (software WebGL2 only)
+      - name: Isolate static versus moving high-LOD settle failure
         id: browser
-        run: SPARK_QUACKLES_LAB=1 SPARK_LAB_PROFILE=focused SPARK_LAB_FRAMES=20 npm run test:browser -- --grep @quackles-lab
-      - name: Validate complete paired receipts
-        if: ${{ !cancelled() && steps.browser.outcome != 'skipped' }}
-        run: SPARK_LAB_EXPECTED=8 node scripts/lab/summarize.mjs "artifacts/spark-quackles/$SPARK_LAB_RUN_ID"
+        run: >-
+          SPARK_LAB_DIAGNOSTICS=1 npm run test:browser --
+          quackles-settle.test.ts paged-lod.test.ts --grep
+          'renders paged LoD with lodSplatCount=100000|@settle-diagnostics'
+      - name: Export exact generated fixtures for local reproduction
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-lab-exact-fixtures
+          path: test/browser/fixtures/
+          retention-days: 7
       - name: Export receipts
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
