@@ -137,6 +137,15 @@ export class UrlPagedSplatsFetcher implements PagedSplatsFetcher {
         `Failed to fetch "${url}": ${response.status} ${response.statusText}`,
       );
     }
-    return new Uint8Array(await response.arrayBuffer());
+    const data = new Uint8Array(await response.arrayBuffer());
+    // A server may ignore Range and return the full representation with 200.
+    if (
+      response.status === 200 &&
+      offset !== undefined &&
+      bytes !== undefined
+    ) {
+      return data.slice(offset, offset + bytes);
+    }
+    return data;
   }
 }
