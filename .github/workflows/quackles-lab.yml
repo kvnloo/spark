@@ -1,0 +1,35 @@
+name: Spark Quackles downstream lab
+on:
+  push:
+    branches:
+      - experiments/quackles-continuity
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - run: npm install
+      - run: node --test scripts/lab/continuity-metrics.test.mjs
+      - run: rustup target add wasm32-unknown-unknown
+      - run: command -v wasm-pack || cargo install wasm-pack --locked
+      - run: npm run build:wasm
+      - run: npx playwright install --with-deps chromium
+      - name: Diagnostic smoke (software WebGL2 only)
+        run: SPARK_QUACKLES_LAB=1 npm run test:browser -- --grep @quackles-lab
+      - name: Export receipts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: quackles-spark-diagnostic-receipts
+          path: |
+            artifacts/spark-quackles/
+            test/browser/playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
