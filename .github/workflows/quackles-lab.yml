@@ -38,7 +38,8 @@ jobs:
         with:
           node-version: "22.x"
       - run: npm ci
-      - uses: actions/cache@v6
+      - uses: actions/cache/restore@v6
+        id: rust-cache
         with:
           path: |
             ~/.cargo/bin
@@ -49,6 +50,7 @@ jobs:
       - run: rustup target add wasm32-unknown-unknown
       - run: command -v wasm-pack || cargo install wasm-pack --locked
       - run: npm run build:wasm
+        id: wasm
       - run: npm run types
       - run: npm test
       - name: Package exact-source runtime for offline reproduction
@@ -86,3 +88,13 @@ jobs:
             test/browser/playwright-report/
           if-no-files-found: warn
           retention-days: 14
+      - name: Preserve successful toolchain builds even when an experiment fails
+        if: ${{ !cancelled() && steps.wasm.outcome == 'success' && steps.rust-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ steps.rust-cache.outputs.cache-primary-key }}
