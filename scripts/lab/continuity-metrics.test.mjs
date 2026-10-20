@@ -4,14 +4,12 @@ import {
   assertComparable,
   summarizeFrameIntervals,
 } from "./continuity-metrics.mjs";
-
 test("empty samples are missing evidence, not zero-latency rendering", () => {
   const result = summarizeFrameIntervals([]);
   assert.equal(result.samples, 0);
   assert.equal(result.meanMs, null);
   assert.equal(result.p99Ms, null);
 });
-
 test("percentiles and missed frames use unsorted time-order for streaks", () => {
   const result = summarizeFrameIntervals([16, 16, 40, 50, 16, 60], 1000 / 60);
   assert.equal(result.samples, 6);
@@ -23,15 +21,16 @@ test("percentiles and missed frames use unsorted time-order for streaks", () => 
   assert.equal(result.intervalsOver50Ms, 1);
   assert.equal(result.estimatedMissedVsyncs, 6);
 });
-
 test("invalid frame intervals are rejected, not filtered out", () => {
-  assert.throws(() => summarizeFrameIntervals([16, NaN]), RangeError);
+  assert.throws(() => summarizeFrameIntervals([16, Number.NaN]), RangeError);
   assert.throws(() => summarizeFrameIntervals([0]), RangeError);
-  assert.throws(() => summarizeFrameIntervals([Infinity]), RangeError);
+  assert.throws(
+    () => summarizeFrameIntervals([Number.POSITIVE_INFINITY]),
+    RangeError,
+  );
   assert.throws(() => summarizeFrameIntervals([16], 0), RangeError);
   assert.throws(() => summarizeFrameIntervals(null), TypeError);
 });
-
 const common = {
   fixture: { sourceFamily: "spark-fixture", sha256: "a" },
   scenario: { tapeSha256: "tape" },
@@ -46,7 +45,6 @@ const common = {
     network: "local",
   },
 };
-
 test("source-family and input-tape comparability is enforced", () => {
   assert.equal(assertComparable(common, structuredClone(common)), true);
   assert.throws(

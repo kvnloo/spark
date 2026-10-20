@@ -12,25 +12,37 @@ export type FrameIntervalSummary = {
   estimatedMissedVsyncs: number;
   maxConsecutiveMisses: number;
 };
-
 export function summarizeFrameIntervals(
   intervals: number[],
   budgetMs?: number,
 ): FrameIntervalSummary;
-
 export type ComparableReceipt = {
-  fixture?: { sourceFamily?: string; sha256?: string };
-  scenario?: { tapeSha256?: string };
+  schemaVersion?: number;
+  runId?: string;
+  repo?: { sha?: string };
+  fixture?: { sourceFamily?: string; sha256?: string; format?: string };
+  scenario?: {
+    tapeSha256?: string;
+    replay?: string;
+    frames?: number;
+    lodSplatCount?: number;
+    targetHz?: number;
+  };
+  metrics?: { budgetMs?: number };
   environment?: {
     browser?: string;
     gpu?: string;
     os?: string;
+    hostFingerprint?: string;
     dpr?: number;
     viewport?: { width: number; height: number };
+    canvas?: { width: number; height: number; pixelRatio: number };
     instrumentation?: string;
     cache?: string;
     network?: string;
   };
 };
-
-export function assertComparable(a: ComparableReceipt, b: ComparableReceipt): true;
+export function assertComparable(
+  a: ComparableReceipt,
+  b: ComparableReceipt,
+): true;

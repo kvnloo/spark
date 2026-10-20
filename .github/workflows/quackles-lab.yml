@@ -19,6 +19,7 @@ jobs:
           node-version: "22.x"
       - run: npm ci
       - run: node --test scripts/lab/*.test.mjs
+      - run: npx biome check scripts/lab test/browser/quackles-lab.test.ts
       - name: Export pinned formatter for offline reproduction
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -49,6 +50,18 @@ jobs:
       - run: command -v wasm-pack || cargo install wasm-pack --locked
       - run: npm run build:wasm
       - run: npm run types
+      - run: npm test
+      - name: Package exact-source runtime for offline reproduction
+        run: |
+          mkdir -p artifacts/runtime
+          git archive HEAD > artifacts/runtime/source.tar
+          tar -czf artifacts/runtime/toolchain.tar.gz node_modules rust/spark-rs/pkg
+      - name: Export reproducible runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: spark-lab-offline-runtime
+          path: artifacts/runtime/
+          retention-days: 2
       - run: npx playwright install --with-deps chromium
       - name: Focused 8-cell downstream suite (software WebGL2 only)
         id: browser

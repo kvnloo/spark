@@ -14,7 +14,9 @@ export function summarizeFrameIntervals(intervals, budgetMs = 1000 / 60) {
   // Unlike Array.some/filter, iteration also visits holes in sparse arrays.
   for (const ms of intervals) {
     if (!Number.isFinite(ms) || ms <= 0 || !Number.isFinite(ms / budgetMs)) {
-      throw new RangeError("intervals must contain only positive, finite numbers");
+      throw new RangeError(
+        "intervals must contain only positive, finite numbers",
+      );
     }
     samples++;
     mean += (ms - mean) / samples;
@@ -52,30 +54,53 @@ const get = (value, key) =>
 // on both sides as soon as either receipt supplies them.
 export function assertComparable(a, b) {
   const strings = [
-    "fixture.sourceFamily", "fixture.sha256", "scenario.tapeSha256",
-    "environment.browser", "environment.gpu", "environment.os",
-    "environment.instrumentation", "environment.cache", "environment.network",
+    "fixture.sourceFamily",
+    "fixture.sha256",
+    "scenario.tapeSha256",
+    "environment.browser",
+    "environment.gpu",
+    "environment.os",
+    "environment.instrumentation",
+    "environment.cache",
+    "environment.network",
   ];
   const numbers = [
-    "environment.dpr", "environment.viewport.width", "environment.viewport.height",
+    "environment.dpr",
+    "environment.viewport.width",
+    "environment.viewport.height",
   ];
-  const extraStrings = ["repo.sha", "fixture.format", "scenario.replay"];
+  const extraStrings = [
+    "runId",
+    "environment.hostFingerprint",
+    "repo.sha",
+    "fixture.format",
+    "scenario.replay",
+  ];
   const extraNumbers = [
-    "schemaVersion", "environment.canvas.width", "environment.canvas.height",
-    "environment.canvas.pixelRatio", "scenario.frames", "scenario.lodSplatCount",
-    "scenario.targetHz", "metrics.budgetMs",
+    "schemaVersion",
+    "environment.canvas.width",
+    "environment.canvas.height",
+    "environment.canvas.pixelRatio",
+    "scenario.frames",
+    "scenario.lodSplatCount",
+    "scenario.targetHz",
+    "metrics.budgetMs",
   ];
   for (const field of extraStrings) {
-    if (get(a, field) !== undefined || get(b, field) !== undefined) strings.push(field);
+    if (get(a, field) !== undefined || get(b, field) !== undefined)
+      strings.push(field);
   }
   for (const field of extraNumbers) {
-    if (get(a, field) !== undefined || get(b, field) !== undefined) numbers.push(field);
+    if (get(a, field) !== undefined || get(b, field) !== undefined)
+      numbers.push(field);
   }
   for (const field of [...strings, ...numbers]) {
     const left = get(a, field);
     const right = get(b, field);
     const valid = strings.includes(field)
-      ? typeof left === "string" && left.trim().length > 0 && !/^(unknown|unavailable)$/i.test(left.trim())
+      ? typeof left === "string" &&
+        left.trim().length > 0 &&
+        !/^(unknown|unavailable)$/i.test(left.trim())
       : Number.isFinite(left) && left > 0;
     if (!valid || left !== right) {
       throw new Error(`Not comparable: ${field} differs or is missing/invalid`);
