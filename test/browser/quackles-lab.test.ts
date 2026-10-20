@@ -9,8 +9,9 @@ import { expect, test } from "./harness.fixture.js";
 // Diagnostic-only: not run by the normal browser suite unless explicitly opted in.
 const enabled = process.env.SPARK_QUACKLES_LAB === "1";
 const full = process.env.SPARK_LAB_PROFILE === "full";
-const seeds = full ? [1, 2, 3, 5, 8, 13, 21] : [1];
-const budgets = full ? [10_000, 100_000] : [10_000];
+const focused = process.env.SPARK_LAB_PROFILE === "focused";
+const seeds = full ? [1, 2, 3, 5, 8, 13, 21] : focused ? [1, 2] : [1];
+const budgets = full || focused ? [10_000, 100_000] : [10_000];
 const sources = full ? ["paged", "in-memory"] : ["paged"];
 const motions = full ? ["orbit", "reverse"] : ["reverse"];
 const sortModes = [true, false];

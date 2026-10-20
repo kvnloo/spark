@@ -12,16 +12,20 @@ and complements its paging/race tests.
 ```sh
 npm install
 npm run build:wasm
-node --test scripts/lab/continuity-metrics.test.mjs
+node --test scripts/lab/*.test.mjs
 # Playwright and the existing Spark browser fixture/build setup are required.
 npx playwright install chromium
 SPARK_QUACKLES_LAB=1 npm run test:browser -- --grep @quackles-lab
+# Intermediate 8-cell sweep (2 seeds x 2 budgets x 2 sorting modes):
+SPARK_QUACKLES_LAB=1 SPARK_LAB_PROFILE=focused SPARK_LAB_FRAMES=45 npm run test:browser -- --grep @quackles-lab
+node scripts/lab/summarize.mjs artifacts/spark-quackles
 # 7 seeds x 2 budgets x 2 formats x 2 motion tapes x 2 sorting modes = 112 cells.
 SPARK_QUACKLES_LAB=1 SPARK_LAB_PROFILE=full npm run test:browser -- --grep @quackles-lab
 ```
 
 Default opt-in smoke: 1 seed × 1 budget × 1 format × 1 motion × 2 sorting
-modes = 2 cells. The full matrix is intentionally manual and expensive. Set
+modes = 2 cells. The focused profile exercises 8 cells and is used for
+fork CI. The full matrix is intentionally manual and expensive. Set
 `SPARK_LAB_FRAMES` to change frames per cell (minimum 20). Set `SPARK_LAB_OUT`
 for the receipt directory. Generated receipts are written under
 `artifacts/spark-quackles/<run-id>/` (untracked, no scene assets committed).

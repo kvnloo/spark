@@ -16,13 +16,17 @@ jobs:
         with:
           node-version: "22.x"
       - run: npm install
-      - run: node --test scripts/lab/continuity-metrics.test.mjs
+      - run: node --test scripts/lab/*.test.mjs
       - run: rustup target add wasm32-unknown-unknown
       - run: command -v wasm-pack || cargo install wasm-pack --locked
       - run: npm run build:wasm
+      - run: npm run types
       - run: npx playwright install --with-deps chromium
-      - name: Diagnostic smoke (software WebGL2 only)
-        run: SPARK_QUACKLES_LAB=1 npm run test:browser -- --grep @quackles-lab
+      - name: Focused 8-cell downstream suite (software WebGL2 only)
+        run: SPARK_QUACKLES_LAB=1 SPARK_LAB_PROFILE=focused SPARK_LAB_FRAMES=45 npm run test:browser -- --grep @quackles-lab
+      - name: Summarize paired receipts
+        if: ${{ !cancelled() }}
+        run: node scripts/lab/summarize.mjs artifacts/spark-quackles
       - name: Export receipts
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
