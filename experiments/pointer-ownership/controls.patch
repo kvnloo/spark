@@ -1,0 +1,28 @@
+--- a/src/controls.ts
++++ b/src/controls.ts
+@@ -629,6 +629,13 @@
+     });
+ 
+     const pointerUp = (event: PointerEvent) => {
++      if (
++        this.rotating?.pointerId !== event.pointerId &&
++        this.sliding?.pointerId !== event.pointerId
++      ) {
++        return;
++      }
++
+       if (this.rotating?.pointerId === event.pointerId) {
+         this.rotating = null;
+         canvas.releasePointerCapture(event.pointerId);
+@@ -647,6 +654,11 @@
+ 
+       this.doublePressed = undefined;
+       this.triplePressed = false;
++      if (event.type === "pointercancel") {
++        this.lastUp = null;
++        this.lastLastUp = null;
++        return;
++      }
+ 
+       const position = this.getPointerPosition(event);
+       const lastUp = this.lastUp;

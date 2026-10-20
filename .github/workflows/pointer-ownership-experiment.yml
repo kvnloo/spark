@@ -1,0 +1,68 @@
+name: Pointer ownership downstream experiment
+on:
+  push:
+    branches:
+      - experiments/pointer-ownership
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - uses: actions/download-artifact@v8
+        with:
+          name: spark-lab-offline-runtime
+          run-id: 39385731760
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: artifacts/runtime
+      - name: Prepare exact toolchain and existing harness
+        run: |
+          tar -xOf artifacts/runtime/source.tar package-lock.json | cmp - package-lock.json
+          tar -xOf artifacts/runtime/source.tar rust/Cargo.lock | cmp - rust/Cargo.lock
+          tar -xzf artifacts/runtime/toolchain.tar.gz
+          cp experiments/pointer-ownership/PointerControls.release.test.ts test/unit/
+          cp experiments/pointer-ownership/pointer-ownership.test.ts test/browser/
+          cp experiments/pointer-ownership/pointer.config.ts test/browser/
+          mkdir -p artifacts/pointer-ownership
+          cp src/controls.ts /tmp/controls.upstream.ts
+      - run: npx playwright install --with-deps chromium
+      - name: Require failing upstream controls
+        shell: bash
+        run: |
+          set +e
+          npx vitest run test/unit/PointerControls.release.test.ts --reporter=verbose > artifacts/pointer-ownership/upstream-unit.log 2>&1
+          unit_status=$?
+          npx playwright test -c test/browser/pointer.config.ts --reporter=line > artifacts/pointer-ownership/upstream-browser.log 2>&1
+          browser_status=$?
+          set -e
+          cat artifacts/pointer-ownership/upstream-unit.log
+          cat artifacts/pointer-ownership/upstream-browser.log
+          test "$unit_status" -ne 0
+          test "$browser_status" -ne 0
+          grep -E '7 failed.*2 passed' artifacts/pointer-ownership/upstream-unit.log
+          grep -E '3 failed' artifacts/pointer-ownership/upstream-browser.log
+      - name: Apply only the explicit candidate
+        run: |
+          git apply --check experiments/pointer-ownership/controls.patch
+          git apply experiments/pointer-ownership/controls.patch
+          sha256sum /tmp/controls.upstream.ts src/controls.ts experiments/pointer-ownership/controls.patch > artifacts/pointer-ownership/source-hashes.txt
+      - run: npx biome check src/controls.ts test/unit/PointerControls.release.test.ts test/browser/pointer-ownership.test.ts test/browser/pointer.config.ts
+      - run: npm run types
+      - name: Full unit suite with the patch
+        run: npm test | tee artifacts/pointer-ownership/fixed-unit.log
+      - name: Browser gesture regressions with the patch
+        run: npx playwright test -c test/browser/pointer.config.ts --reporter=line | tee artifacts/pointer-ownership/fixed-browser.log
+      - name: Preserve both controls and candidate evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: pointer-ownership-experiment-evidence
+          path: artifacts/pointer-ownership/
+          retention-days: 14
