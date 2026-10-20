@@ -17,22 +17,26 @@ The workflow files in those PRs are **fork-only evidence infrastructure** and mu
 
 ## Experiment lab — still qualifying instrumentation
 
-Branch: [`experiments/quackles-continuity`](https://github.com/kvnloo/spark/tree/experiments/quackles-continuity). Latest pushed head: `3a5089a53ab40f1491f2b0e8aedf038f155462d5`; [run 39385731760](https://github.com/kvnloo/spark/actions/runs/39385731760) is pending final verification at this checkpoint.
+Branch: [`experiments/quackles-continuity`](https://github.com/kvnloo/spark/tree/experiments/quackles-continuity). Latest verified head: `3a5089a53ab40f1491f2b0e8aedf038f155462d5`; [run 39385731760](https://github.com/kvnloo/spark/actions/runs/39385731760) **completed with failure**, not pending.
 
-**72 local lab checks pass**: frame distributions, malformed/missing evidence, source/host/replay comparability, independent trial identities, camera tapes, and exact 2/8/112-cell matrix construction. Full 112-cell browser execution is **not yet established**. The suite extends Spark's existing browser harness; it does not replace [asundqui's pager/browser work #428](https://github.com/sparkjsdev/spark/pull/428).
+**72 local lab checks pass**: frame distributions, malformed/missing evidence, source/host/replay comparability, independent trial identities, camera tapes, and exact 2/8/112-cell matrix construction. The latest CI contracts job passed its lab tests and Biome check. The browser job passed its WASM build, both TypeScript checks and **159 upstream unit tests**, but its focused browser sweep finished **4 passed / 4 failed**. All four 10,000-splat cases passed; all four 100,000-splat cases timed out waiting for Spark to settle, across both seeds and both sorting modes. This timeout is not yet isolated to renderer behavior, harness scheduling or execution-environment limits.
+
+Only **4 of 8 expected receipts** were produced (2 comparable sorting pairs), so the summary correctly reports `complete: false` and `INSUFFICIENT_FOR_UPSTREAM_PROMOTION`. [Latest evidence artifact](https://github.com/kvnloo/spark/actions/runs/39385731760/artifacts/12247762457). The original ES2020 `replaceAll` failure is fixed and is not the current blocker. The current blocker is the high-LOD settle timeout; do not hide it by dropping those cells or merely raising the timeout.
+
+Full 112-cell browser execution is **not yet established**. The suite extends Spark's existing browser harness; it does not replace [asundqui's pager/browser work #428](https://github.com/sparkjsdev/spark/pull/428).
 
 ### Failure and evidence history — do not erase
 
 - `f79d695`, [39377799570](https://github.com/kvnloo/spark/actions/runs/39377799570): original 2-cell smoke passed. Its timing report is **superseded**, not a performance baseline: competing scheduling, no raw intervals, and incomplete drawing-buffer metadata were subsequently identified.
 - `baf286c`, [39379105809](https://github.com/kvnloo/spark/actions/runs/39379105809): **FAILED before browser execution**. `String.replaceAll` conflicted with Spark's ES2020 TypeScript target. No eight-cell result exists for this run.
 - `428cd90`, [39382525749](https://github.com/kvnloo/spark/actions/runs/39382525749): TypeScript and lab contracts passed; all eight browser cases emitted receipts but **failed the harness's render-count assertion**. It counted internal `FullScreenQuad` passes as application display submissions (21–22 versus 20). These are not renderer failures or qualified performance results.
-- `3a5089`: separates display/internal render counts, retains one application scheduler, records complete raw intervals and real drawing-buffer size, verifies nonblank motion endpoints and exact return-to-origin images, and rejects mixed-host/run/trial receipts. Browser validation remains pending at this checkpoint.
+- `3a5089`, [39385731760](https://github.com/kvnloo/spark/actions/runs/39385731760): separates display/internal render counts, retains one application scheduler, records complete raw intervals and real drawing-buffer size, verifies nonblank motion endpoints and exact return-to-origin images, and rejects mixed-host/run/trial receipts. **Final browser outcome: 4 passed / 4 high-LOD settle timeouts**, with only 4/8 receipts; incomplete and not a qualified performance result.
 
 Normal timing trials do not add per-frame readback or GPU fences. rAF cadence is browser scheduling, **not GPU completion or input latency**. Frame-stepped poses are not wall-clock-normalized input replay. Settled image equality does not establish in-motion continuity. SwiftShader is not a physical phone GPU. Different instrumentation versions must never be compared as a claimed speedup.
 
 ## Work lanes
 
-1. **Continuity/sorting:** validate instrumentation, expand controlled camera/LoD experiments, and reproduce [#407](https://github.com/sparkjsdev/spark/issues/407) on affected Mac Chrome before proposing a platform fix.
+1. **Continuity/sorting:** isolate the 100,000-splat settle timeout with phase-specific state diagnostics and matched control runs; validate instrumentation before expanding the matrix. Reproduce [#407](https://github.com/sparkjsdev/spark/issues/407) on affected Mac Chrome before proposing a platform fix.
 2. **Streaming lifecycle:** controlled late/aborted requests, scene churn, ownership and byte correctness. Current fetchers already accept `AbortSignal`; do not repeat outdated claims from [#318](https://github.com/sparkjsdev/spark/issues/318) without checking source.
 3. **Quackles fidelity:** source-matched authored cameras and reference renders. [RFC #47](https://github.com/kvnloo/quackles/issues/47) found fidelity problems **at 4–8× zoom**, not a measured 4–8× overall quality loss. Mesh remains scene authority; don't mix 201MP/1GP source masters.
 4. **Hardware/mobile/XR:** physical Android and affected desktop/headset acceptance are separate strata; emulated viewports and software GPUs cannot qualify these claims.
