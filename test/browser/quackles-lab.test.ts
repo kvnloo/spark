@@ -6,20 +6,29 @@ import path from "node:path";
 import { summarizeFrameIntervals } from "../../scripts/lab/continuity-metrics.mjs";
 import { expect, test } from "./harness.fixture.js";
 
-// Diagnostic-only: not run by the normal browser suite unless explicitly opted in.
 const enabled = process.env.SPARK_QUACKLES_LAB === "1";
-const full = process.env.SPARK_LAB_PROFILE === "full";
-const focused = process.env.SPARK_LAB_PROFILE === "focused";
+const profile = process.env.SPARK_LAB_PROFILE ?? "smoke";
+const full = profile === "full";
+const focused = profile === "focused";
 const seeds = full ? [1, 2, 3, 5, 8, 13, 21] : focused ? [1, 2] : [1];
 const budgets = full || focused ? [10_000, 100_000] : [10_000];
 const sources = full ? ["paged", "in-memory"] : ["paged"];
 const motions = full ? ["orbit", "reverse"] : ["reverse"];
-const sortModes = [true, false];
-const frameCount = Number(process.env.SPARK_LAB_FRAMES ?? (full ? 120 : 90));
+const frameCount = Number(process.env.SPARK_LAB_FRAMES ?? 45);
 const targetHz = Number(process.env.SPARK_LAB_HZ ?? 60);
+const repetitions = Number(process.env.SPARK_LAB_REPEATS ?? 1);
 const fixtures = path.join(import.meta.dirname, "fixtures");
 const labRoot = path.resolve(process.env.SPARK_LAB_OUT ?? "artifacts/spark-quackles");
-const runId = `${new Date().toISOString().replaceAll(":", "-")}-${process.pid}`;
+const runId = process.env.SPARK_LAB_RUN_ID ??
+  `${new Date().toISOString().replace(/:/g, "-")}-${process.pid}`;
+
+if (enabled) {
+  if (!["smoke", "focused", "full"].includes(profile)) throw new Error("Unknown SPARK_LAB_PROFILE");
+  if (!Number.isInteger(frameCount) || frameCount < 20 || frameCount > 600) throw new Error("SPARK_LAB_FRAMES must be an integer from 20 to 600");
+  if (!Number.isInteger(repetitions) || repetitions < 1 || repetitions > 10) throw new Error("SPARK_LAB_REPEATS must be an integer from 1 to 10");
+  if (!Number.isFinite(targetHz) || targetHz <= 0 || targetHz > 360) throw new Error("SPARK_LAB_HZ must be positive and at most 360");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(runId)) throw new Error("Unsafe SPARK_LAB_RUN_ID");
+}
 
 function gitRef(...args: string[]) {
   try {
@@ -29,174 +38,186 @@ function gitRef(...args: string[]) {
   }
 }
 
-function cameraTape(seed: number, motion: string, count: number) {
-  let state = seed >>> 0;
-  const rand = () => {
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
-    return (state >>> 0) / 4294967296;
-  };
-  const phase = rand() * 0.2;
-  return Array.from({ length: count }, (_, i) => {
-    const t = (i / Math.max(1, count - 1)) * 2 * Math.PI;
-    const x =
-      motion === "reverse"
-        ? Math.sin(t * 2 + phase) * 1.5
-        : Math.sin(t + phase) * 1.5;
-    const y = Math.cos(t * 0.5) * 0.25;
-    return [x, y, 7 + Math.cos(t) * 0.3];
+const sha256 = (value: string | Uint8Array) =>
+  createHash("sha256").update(value).digest("hex");
+const imageHash = (url: string) => sha256(Buffer.from(url.split(",")[1], "base64"));
+
+function cameraTape(seed: number, motion: string) {
+  // Spread small seed values across the orbit rather than nearly identical phases.
+  const phase = ((Math.imul(seed, 0x9e3779b1) >>> 0) / 4294967296) * 2 * Math.PI;
+  return Array.from({ length: frameCount }, (_, i) => {
+    const t = (i / (frameCount - 1)) * 2 * Math.PI;
+    const x = Math.sin(t * (motion === "reverse" ? 2 : 1) + phase) * 1.5;
+    return [x, Math.cos(t * 0.5) * 0.25, 7 + Math.cos(t) * 0.3];
   });
 }
 
 async function hashFixture(source: string) {
   const directory = source === "paged" ? path.join(fixtures, "chunked") : fixtures;
-  const files = (await readdir(directory))
-    .filter((name) => /^furry-logo-pedestal-lod.*\.(rad|radc)$/.test(name))
-    .sort();
-  if (!files.length) throw new Error(`Missing Spark browser fixture in ${directory}`);
-  const hash = createHash("sha256");
-  for (const name of files) {
-    const bytes = await readFile(path.join(directory, name));
-    hash.update(name);
-    hash.update("\0");
-    hash.update(bytes);
+  const header = "furry-logo-pedestal-lod.rad";
+  const names = (await readdir(directory)).filter((name) => name === header ||
+    (source === "paged" && /^furry-logo-pedestal-lod-\d+\.radc$/.test(name))).sort();
+  if (!names.includes(header) || (source === "paged" && names.length < 2)) {
+    throw new Error(`Missing complete ${source} fixture in ${directory}`);
   }
-  return hash.digest("hex");
+  const files = [];
+  for (const name of names) {
+    const bytes = await readFile(path.join(directory, name));
+    files.push({ name, sizeBytes: bytes.length, sha256: sha256(bytes) });
+  }
+  return { sha256: sha256(JSON.stringify(files)), files };
 }
 
-const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
-const imageHash = (url: string) =>
-  createHash("sha256")
-    .update(Buffer.from(url.slice(url.indexOf(",") + 1), "base64"))
-    .digest("hex");
-
 test.describe("@quackles-lab motion/LOD receipts", () => {
-  test.skip(!enabled, "Set SPARK_QUACKLES_LAB=1 to run the opt-in experiment matrix");
-
+  test.skip(!enabled, "Set SPARK_QUACKLES_LAB=1 to run downstream experiments");
   for (const source of sources) {
     for (const motion of motions) {
       for (const seed of seeds) {
         for (const lodSplatCount of budgets) {
-          for (const sortRadial of sortModes) {
-            test(`${source} ${motion} seed=${seed} budget=${lodSplatCount} radial=${sortRadial}`, async ({
-              harnessPage,
-              browser,
-            }) => {
-              test.setTimeout(240_000);
-              expect(Number.isInteger(frameCount) && frameCount >= 20).toBe(true);
-              expect(Number.isFinite(targetHz) && targetHz > 0).toBe(true);
-              const positions = cameraTape(seed, motion, frameCount);
-              const tapeSha256 = sha256(JSON.stringify(positions));
-              const fixtureSha256 = await hashFixture(source);
-              const url =
-                source === "paged"
+          for (let trialIndex = 0; trialIndex < repetitions; trialIndex++) {
+            // Alternate AB/BA order across planned repetitions and seeds.
+            const sortModes = (seed + trialIndex) % 2 ? [false, true] : [true, false];
+            for (const sortRadial of sortModes) {
+              test(`${source} ${motion} seed=${seed} budget=${lodSplatCount} trial=${trialIndex} radial=${sortRadial}`, async ({
+                harnessPage, browser,
+              }, testInfo) => {
+                test.setTimeout(300_000);
+                const positions = cameraTape(seed, motion);
+                const fixture = await hashFixture(source);
+                const url = source === "paged"
                   ? "/test/browser/fixtures/chunked/furry-logo-pedestal-lod.rad"
                   : "/test/browser/fixtures/furry-logo-pedestal-lod.rad";
-              const observed = await harnessPage.evaluate(
-                async ({ positions, lodSplatCount, sortRadial, url, paged }) => {
-                  const h = window.harness;
-                  h.createSpark({ lodSplatCount, sortRadial });
-                  const camera = h.createCamera({ fov: 60, position: [0, 0, 7] });
-                  h.addSplatMesh({ url, paged, quaternion: [1, 0, 0, 0] });
-                  await h.settle();
-                  h.renderer.render(h.scene, camera);
-                  // Capture only at fully settled boundaries, never during motion.
-                  const before = h.getPixels();
-                  const gl = h.renderer.getContext();
-                  const debug = gl.getExtension("WEBGL_debug_renderer_info");
-                  const gpu = debug
-                    ? String(gl.getParameter(debug.UNMASKED_RENDERER_WEBGL))
-                    : String(gl.getParameter(gl.RENDERER));
-                  // Warm the path outside the measured region.
-                  for (let i = 0; i < 5; i++) {
-                    await new Promise<void>((resolve) => {
-                      requestAnimationFrame(() => {
+                const observed = await harnessPage.evaluate(
+                  async ({ positions, lodSplatCount, sortRadial, url, paged }) => {
+                    const h = window.harness;
+                    let continuous = false;
+                    h.createSpark({
+                      lodSplatCount, sortRadial,
+                      // One owner of frame scheduling: no extra onDirty render
+                      // alongside the measured continuous loop.
+                      onDirty: () => { if (!continuous) h.requestRender(); },
+                    });
+                    const camera = h.createCamera({ fov: 60, position: [0, 0, 7] });
+                    h.addSplatMesh({ url, paged, quaternion: [1, 0, 0, 0] });
+                    await h.settle();
+                    const gl = h.renderer.getContext();
+                    const debug = gl.getExtension("WEBGL_debug_renderer_info");
+                    const gpu = String(gl.getParameter(debug ? debug.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+                    function capture() {
+                      const canvas = document.createElement("canvas");
+                      canvas.width = gl.drawingBufferWidth;
+                      canvas.height = gl.drawingBufferHeight;
+                      const context = canvas.getContext("2d");
+                      if (!context) throw new Error("Cannot inspect settled canvas");
+                      context.drawImage(h.renderer.domElement, 0, 0);
+                      const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+                      let nonBlackPixels = 0;
+                      for (let i = 0; i < data.length; i += 4) {
+                        if (data[i] || data[i + 1] || data[i + 2]) nonBlackPixels++;
+                      }
+                      return { png: h.getPixels(), nonBlackPixels };
+                    }
+                    // All readbacks are outside the measured frame sequence.
+                    const before = capture();
+                    continuous = true;
+                    for (let i = 0; i < 5; i++) {
+                      await new Promise<void>((resolve) => requestAnimationFrame(() => {
                         h.renderer.render(h.scene, camera);
                         resolve();
-                      });
-                    });
-                  }
-                  const intervals: number[] = [];
-                  let previous: number | undefined;
-                  for (const position of positions) {
-                    await new Promise<void>((resolve) => {
-                      requestAnimationFrame((time) => {
-                        if (previous !== undefined) intervals.push(time - previous);
-                        previous = time;
-                        camera.position.set(position[0], position[1], position[2]);
-                        camera.lookAt(0, 0, 0);
-                        h.renderer.render(h.scene, camera);
-                        resolve();
-                      });
-                    });
-                  }
-                  camera.position.set(0, 0, 7);
-                  camera.lookAt(0, 0, 0);
-                  await h.settle();
-                  h.renderer.render(h.scene, camera);
-                  const after = h.getPixels();
-                  return {
-                    intervals,
-                    before,
-                    after,
-                    gpu,
-                    userAgent: navigator.userAgent,
-                    viewport: { width: innerWidth, height: innerHeight },
-                    dpr: devicePixelRatio,
-                  };
-                },
-                { positions, lodSplatCount, sortRadial, url, paged: source === "paged" },
-              );
-
-              const result = {
-                schemaVersion: 1,
-                status: "DIAGNOSTIC_ONLY",
-                createdAt: new Date().toISOString(),
-                repo: {
-                  sha: gitRef("rev-parse", "HEAD") ?? process.env.GITHUB_SHA,
-                  branch: gitRef("branch", "--show-current"),
-                },
-                fixture: {
-                  id: "furry-logo-pedestal-lod",
-                  sourceFamily: "spark-test-fixture (not Quackles Blue)",
-                  format: source,
-                  sha256: fixtureSha256,
-                },
-                environment: {
-                  browser: `Chromium ${browser.version()}`,
-                  userAgent: observed.userAgent,
-                  os: `${os.platform()} ${os.release()}`,
-                  gpu: observed.gpu,
-                  dpr: observed.dpr,
-                  viewport: observed.viewport,
-                  instrumentation: "rAF cadence + explicit render, no in-motion readback",
-                  network: "local Vite fixtures",
-                  cache: "warm after settled fixture load",
-                  device: "Playwright desktop / SwiftShader (not physical-phone acceptance)",
-                },
-                scenario: { motion, seed, lodSplatCount, sortRadial, frames: frameCount, tapeSha256 },
-                metrics: summarizeFrameIntervals(observed.intervals, 1000 / targetHz),
-                checks: {
-                  initialPixelSha256: imageHash(observed.before),
-                  recoveredPixelSha256: imageHash(observed.after),
-                  settledPixelsIdentical: observed.before === observed.after,
-                },
-                limitations: [
-                  "rAF cadence is not GPU completion latency or end-to-end input latency",
-                  "No per-frame readPixels; blank-frame and stutter perception unverified",
-                  "Software WebGL2 cannot qualify physical Android or hardware GPU performance",
-                  "The Spark test fixture cannot establish Quackles Blue macro fidelity",
-                ],
-              };
-              const name = `${source}-${motion}-seed${seed}-lod${lodSplatCount}-radial${sortRadial}.json`;
-              const out = path.join(labRoot, runId);
-              await mkdir(out, { recursive: true });
-              await writeFile(path.join(out, name), `${JSON.stringify(result, null, 2)}\n`);
-              expect(result.metrics.samples).toBe(frameCount - 1);
-              expect(result.checks.initialPixelSha256).toHaveLength(64);
-              expect(result.checks.recoveredPixelSha256).toHaveLength(64);
-            });
+                      }));
+                    }
+                    const intervals: number[] = [];
+                    let previous: number | undefined;
+                    let renderCalls = 0;
+                    const originalRender = h.renderer.render;
+                    h.renderer.render = (scene, view) => {
+                      renderCalls++;
+                      originalRender.call(h.renderer, scene, view);
+                    };
+                    try {
+                      // N+1 rAF boundaries cover all N draws, including the last.
+                      for (let i = 0; i <= positions.length; i++) {
+                        await new Promise<void>((resolve) => requestAnimationFrame((time) => {
+                          if (previous !== undefined) intervals.push(time - previous);
+                          previous = time;
+                          if (i < positions.length) {
+                            const position = positions[i];
+                            camera.position.set(position[0], position[1], position[2]);
+                            camera.lookAt(0, 0, 0);
+                            h.renderer.render(h.scene, camera);
+                          }
+                          resolve();
+                        }));
+                      }
+                    } finally {
+                      h.renderer.render = originalRender;
+                      continuous = false;
+                    }
+                    camera.position.set(0, 0, 7);
+                    camera.lookAt(0, 0, 0);
+                    await h.settle();
+                    const after = capture();
+                    return {
+                      intervals, before, after, renderCalls, gpu,
+                      userAgent: navigator.userAgent,
+                      viewport: { width: innerWidth, height: innerHeight },
+                      dpr: devicePixelRatio,
+                      canvas: { width: gl.drawingBufferWidth, height: gl.drawingBufferHeight, pixelRatio: h.renderer.getPixelRatio() },
+                    };
+                  },
+                  { positions, lodSplatCount, sortRadial, url, paged: source === "paged" },
+                );
+                const sourceStatus = gitRef("status", "--porcelain", "--untracked-files=all", "--", "src", "test/browser", "scripts/lab", "package-lock.json");
+                const result = {
+                  schemaVersion: 2,
+                  status: "DIAGNOSTIC_ONLY",
+                  createdAt: new Date().toISOString(),
+                  repo: { sha: gitRef("rev-parse", "HEAD"), dirty: sourceStatus === null ? null : sourceStatus.length > 0 },
+                  fixture: { id: "furry-logo-pedestal-lod", sourceFamily: "spark-test-fixture (not Quackles Blue)", format: source, ...fixture },
+                  environment: {
+                    browser: `Chromium ${browser.version()}`,
+                    userAgent: observed.userAgent,
+                    os: `${os.platform()} ${os.release()}`,
+                    gpu: observed.gpu, dpr: observed.dpr,
+                    viewport: observed.viewport, canvas: observed.canvas,
+                    instrumentation: "single-owner-rAF-v2; counted draws; boundary readbacks only",
+                    network: "local Vite fixtures",
+                    cache: "initial-view-resident; new motion pages may still load",
+                    device: "Playwright software WebGL2; not physical-device acceptance",
+                  },
+                  trial: { index: trialIndex, repeatIndex: testInfo.repeatEachIndex, retry: testInfo.retry, project: testInfo.project.name },
+                  scenario: { motion, seed, lodSplatCount, sortRadial, frames: frameCount, targetHz, replay: "frame-stepped-v2", tapeSha256: sha256(JSON.stringify(positions)) },
+                  rawIntervals: observed.intervals,
+                  metrics: summarizeFrameIntervals(observed.intervals, 1000 / targetHz),
+                  checks: {
+                    initialPixelSha256: imageHash(observed.before.png),
+                    recoveredPixelSha256: imageHash(observed.after.png),
+                    settledPixelsIdentical: observed.before.png === observed.after.png,
+                    initialNonBlackPixels: observed.before.nonBlackPixels,
+                    recoveredNonBlackPixels: observed.after.nonBlackPixels,
+                    renderCalls: observed.renderCalls,
+                  },
+                  limitations: [
+                    "rAF cadence is not GPU completion or input latency",
+                    "Frame-stepped camera poses do not normalize wall-clock motion speed",
+                    "No in-motion pixel continuity or physical GPU performance claim",
+                    "No Quackles Blue fidelity or complete motion-path warm-cache claim",
+                  ],
+                };
+                const name = `${source}-${motion}-seed${seed}-lod${lodSplatCount}-trial${trialIndex}-repeat${testInfo.repeatEachIndex}-retry${testInfo.retry}-${sha256(testInfo.project.name).slice(0, 8)}-radial${sortRadial}.json`;
+                const out = path.join(labRoot, runId);
+                await mkdir(out, { recursive: true });
+                const json = `${JSON.stringify(result, null, 2)}\n`;
+                // Never overwrite a prior trial, repetition, retry, or project.
+                await writeFile(path.join(out, name), json, { flag: "wx" });
+                await testInfo.attach(name, { body: json, contentType: "application/json" });
+                expect(result.metrics.samples).toBe(frameCount);
+                expect(result.checks.renderCalls).toBe(frameCount);
+                expect(result.checks.initialNonBlackPixels).toBeGreaterThan(0);
+                expect(result.checks.recoveredNonBlackPixels).toBeGreaterThan(0);
+                expect(result.checks.settledPixelsIdentical).toBe(true);
+              });
+            }
           }
         }
       }

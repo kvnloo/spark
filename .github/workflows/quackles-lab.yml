@@ -6,8 +6,29 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  SPARK_LAB_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 jobs:
-  smoke:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.x"
+      - run: npm ci
+      - run: node --test scripts/lab/*.test.mjs
+      - name: Export pinned formatter for offline reproduction
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: pinned-lab-formatter
+          path: |
+            node_modules/@biomejs/cli-linux-x64/biome
+            biome.json
+          retention-days: 2
+  browser:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -15,18 +36,26 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22.x"
-      - run: npm install
-      - run: node --test scripts/lab/*.test.mjs
+      - run: npm ci
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: ${{ runner.os }}-spark-lab-${{ hashFiles('rust/Cargo.lock') }}
       - run: rustup target add wasm32-unknown-unknown
       - run: command -v wasm-pack || cargo install wasm-pack --locked
       - run: npm run build:wasm
       - run: npm run types
       - run: npx playwright install --with-deps chromium
       - name: Focused 8-cell downstream suite (software WebGL2 only)
-        run: SPARK_QUACKLES_LAB=1 SPARK_LAB_PROFILE=focused SPARK_LAB_FRAMES=45 npm run test:browser -- --grep @quackles-lab
-      - name: Summarize paired receipts
-        if: ${{ !cancelled() }}
-        run: node scripts/lab/summarize.mjs artifacts/spark-quackles
+        id: browser
+        run: SPARK_QUACKLES_LAB=1 SPARK_LAB_PROFILE=focused SPARK_LAB_FRAMES=20 npm run test:browser -- --grep @quackles-lab
+      - name: Validate complete paired receipts
+        if: ${{ !cancelled() && steps.browser.outcome != 'skipped' }}
+        run: SPARK_LAB_EXPECTED=8 node scripts/lab/summarize.mjs "artifacts/spark-quackles/$SPARK_LAB_RUN_ID"
       - name: Export receipts
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
