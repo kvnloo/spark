@@ -13,19 +13,18 @@ describe("FileBytesPagedSplatsFetcher short reads", () => {
     { offset: 8, bytes: 12, expected: [] },
     { offset: 5, bytes: 0, expected: [] },
     { offset: 1, bytes: 3, expected: [1, 2, 3] },
-  ])("returns available bytes at offset=$offset, bytes=$bytes", async ({
-    offset,
-    bytes,
-    expected,
-  }) => {
-    const result = await new FileBytesPagedSplatsFetcher(source).fetchRange(
-      signal,
-      offset,
-      bytes,
-    );
-    expect(result).toEqual(new Uint8Array(expected));
-    expect(result.buffer).not.toBe(source.buffer);
-  });
+  ])(
+    "returns available bytes at offset=$offset, bytes=$bytes",
+    async ({ offset, bytes, expected }) => {
+      const result = await new FileBytesPagedSplatsFetcher(source).fetchRange(
+        signal,
+        offset,
+        bytes,
+      );
+      expect(result).toEqual(new Uint8Array(expected));
+      expect(result.buffer).not.toBe(source.buffer);
+    },
+  );
 
   test("returns an empty range from an empty file", async () => {
     const fetcher = new FileBytesPagedSplatsFetcher(new Uint8Array());
